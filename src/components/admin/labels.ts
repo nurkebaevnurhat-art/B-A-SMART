@@ -1,0 +1,2 @@
+export const UNIT_STATUS = { DRAFT: ["Черновик", "muted"], AVAILABLE: ["В продаже", "success"], RESERVED: ["Бронь", "accent"], SOLD: ["Продан", "primary"], ARCHIVED: ["Архив", "outline"] } as const;
+export const PAYMENT_STATUS = { PENDING: ["Ожидает", "accent"], SUCCEEDED: ["Успешно", "success"], FAILED: ["Ошибка", "danger"], CANCELLED: ["Отменён", "muted"], REFUNDED: ["Возврат", "outline"] } as const;
