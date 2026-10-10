@@ -1,0 +1,703 @@
+// B&A SMART — схема базы данных (PostgreSQL + Prisma)
+// Цены хранятся в целых тенге (₸).
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ───────────────────────── Пользователи и доступ ─────────────────────────
+
+model Role {
+  id          String   @id @default(cuid())
+  key         String   @unique // owner | admin | staff | customer
+  name        String
+  permissions String[]
+  users       User[]
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+model User {
+  id           String   @id @default(cuid())
+  email        String?  @unique
+  phone        String?  @unique
+  name         String
+  passwordHash String
+  roleId       String
+  role         Role     @relation(fields: [roleId], references: [id])
+  isActive     Boolean  @default(true)
+  locale       String   @default("ru")
+  city         String?
+  address      String?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  sessions        Session[]
+  resetTokens     PasswordResetToken[]
+  cart            Cart?
+  orders          Order[]
+  favorites       Favorite[]
+  reviews         Review[]
+  installmentApps InstallmentApplication[]
+  contracts       InstallmentContract[]
+  tickets         SupportTicket[]
+  auditLogs       AuditLog[]
+  inspections     InspectionReport[]
+
+  @@index([roleId])
+}
+
+model Session {
+  id         String   @id @default(cuid())
+  tokenHash  String   @unique
+  userId     String
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  userAgent  String?
+  expiresAt  DateTime
+  createdAt  DateTime @default(now())
+  lastSeenAt DateTime @default(now())
+
+  @@index([userId])
+}
+
+model PasswordResetToken {
+  id        String    @id @default(cuid())
+  tokenHash String    @unique
+  userId    String
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime  @default(now())
+
+  @@index([userId])
+}
+
+// ───────────────────────── Каталог ─────────────────────────
+
+enum ProductKind {
+  SMARTPHONE
+  TABLET
+  WATCH
+  HEADPHONES
+  ACCESSORY
+}
+
+enum ProductCondition {
+  NEW
+  USED
+  REFURBISHED
+}
+
+enum PublishStatus {
+  DRAFT
+  PUBLISHED
+  ARCHIVED
+}
+
+model Brand {
+  id        String    @id @default(cuid())
+  name      String    @unique
+  slug      String    @unique
+  sortOrder Int       @default(0)
+  products  Product[]
+}
+
+model Category {
+  id        String     @id @default(cuid())
+  slug      String     @unique
+  nameRu    String
+  nameKk    String
+  group     String // devices | accessories
+  sortOrder Int        @default(0)
+  parentId  String?
+  parent    Category?  @relation("CategoryTree", fields: [parentId], references: [id])
+  children  Category[] @relation("CategoryTree")
+  products  Product[]
+}
+
+model Product {
+  id                   String           @id @default(cuid())
+  slug                 String           @unique
+  name                 String
+  model                String
+  // Ключ модели для совместимости аксессуаров (например, "iphone-15")
+  modelKey             String?
+  brandId              String
+  brand                Brand            @relation(fields: [brandId], references: [id])
+  categoryId           String
+  category             Category         @relation(fields: [categoryId], references: [id])
+  kind                 ProductKind
+  condition            ProductCondition @default(NEW)
+  status               PublishStatus    @default(DRAFT)
+  isNewArrival         Boolean          @default(false)
+  isFeatured           Boolean          @default(false)
+  installmentAvailable Boolean          @default(false)
+  description          String           @default("")
+  descriptionKk        String?
+  // Технические характеристики конкретной модели: [{group, items:[{label, value}]}]
+  specs                Json             @default("[]")
+  equipment            String? // комплектация
+  warranty             String? // условия гарантии
+  seoTitle             String?
+  seoDescription       String?
+  salesCount           Int              @default(0)
+  publishedAt          DateTime?
+  createdAt            DateTime         @default(now())
+  updatedAt            DateTime         @updatedAt
+
+  variants        ProductVariant[]
+  images          ProductImage[]
+  usedUnits       UsedUnit[]
+  compatibleWith  AccessoryCompatibility[]
+  favorites       Favorite[]
+  reviews         Review[]
+  orderItems      OrderItem[]
+  installmentApps InstallmentApplication[]
+
+  @@index([status, kind, condition])
+  @@index([brandId])
+  @@index([categoryId])
+  @@index([modelKey])
+}
+
+model ProductVariant {
+  id        String   @id @default(cuid())
+  productId String
+  product   Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+  sku       String   @unique
+  color     String?
+  colorHex  String?
+  storageGb Int?
+  ramGb     Int?
+  price     Int
+  oldPrice  Int?
+  stock     Int      @default(0)
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  cartItems  CartItem[]
+  orderItems OrderItem[]
+  movements  InventoryMovement[]
+  images     ProductImage[]
+
+  @@index([productId])
+  @@index([price])
+}
+
+model ProductImage {
+  id         String          @id @default(cuid())
+  url        String
+  alt        String?
+  sortOrder  Int             @default(0)
+  productId  String?
+  product    Product?        @relation(fields: [productId], references: [id], onDelete: Cascade)
+  variantId  String?
+  variant    ProductVariant? @relation(fields: [variantId], references: [id], onDelete: SetNull)
+  usedUnitId String?
+  usedUnit   UsedUnit?       @relation(fields: [usedUnitId], references: [id], onDelete: Cascade)
+  createdAt  DateTime        @default(now())
+
+  @@index([productId])
+  @@index([usedUnitId])
+}
+
+// Загруженные файлы хранятся в базе, чтобы не зависеть от локального диска сервера.
+model MediaFile {
+  id        String   @id @default(cuid())
+  mime      String
+  size      Int
+  data      Bytes
+  createdAt DateTime @default(now())
+}
+
+model AccessoryCompatibility {
+  id          String  @id @default(cuid())
+  accessoryId String
+  accessory   Product @relation(fields: [accessoryId], references: [id], onDelete: Cascade)
+  modelKey    String
+
+  @@unique([accessoryId, modelKey])
+  @@index([modelKey])
+}
+
+model InventoryMovement {
+  id        String         @id @default(cuid())
+  variantId String
+  variant   ProductVariant @relation(fields: [variantId], references: [id], onDelete: Cascade)
+  delta     Int
+  reason    String // receipt | order | cancel | adjustment
+  orderId   String?
+  actorId   String?
+  comment   String?
+  createdAt DateTime       @default(now())
+
+  @@index([variantId])
+}
+
+// ───────────────────────── Б/у экземпляры ─────────────────────────
+
+enum UsedGrade {
+  EXCELLENT
+  GOOD
+  FAIR
+}
+
+enum UnitStatus {
+  DRAFT
+  AVAILABLE
+  RESERVED
+  SOLD
+  ARCHIVED
+}
+
+model UsedUnit {
+  id                String       @id @default(cuid())
+  code              String       @unique // публичный идентификатор экземпляра, например BA-U-0001
+  productId         String
+  product           Product      @relation(fields: [productId], references: [id])
+  color             String?
+  colorHex          String?
+  storageGb         Int?
+  price             Int
+  oldPrice          Int?
+  grade             UsedGrade
+  bodyCondition     String
+  screenCondition   String
+  batteryHealth     Int? // %, только если измерено
+  defects           String?
+  repairs           String? // ремонты и заменённые детали, если известны
+  equipment         String?
+  warranty          String?
+  serialMasked      String? // только последние символы IMEI/серийного номера
+  status            UnitStatus   @default(DRAFT)
+  reservedUntil     DateTime?
+  reservedByCartId  String?
+  soldOrderId       String?
+  createdAt         DateTime     @default(now())
+  updatedAt         DateTime     @updatedAt
+
+  images     ProductImage[]
+  inspection InspectionReport?
+  cartItems  CartItem[]
+  orderItems OrderItem[]
+  favorites  Favorite[]
+  installmentApps InstallmentApplication[]
+
+  @@index([status])
+  @@index([productId])
+  @@index([price])
+}
+
+model InspectionReport {
+  id          String   @id @default(cuid())
+  usedUnitId  String   @unique
+  usedUnit    UsedUnit @relation(fields: [usedUnitId], references: [id], onDelete: Cascade)
+  inspectorId String?
+  inspector   User?    @relation(fields: [inspectorId], references: [id], onDelete: SetNull)
+  inspectedAt DateTime @default(now())
+  // [{key, label, result: PASS|FAIL|NOT_TESTED, note?}]
+  checks      Json     @default("[]")
+  summary     String?
+  updatedAt   DateTime @updatedAt
+}
+
+// ───────────────────────── Корзина и избранное ─────────────────────────
+
+model Cart {
+  id        String     @id @default(cuid())
+  token     String     @unique
+  userId    String?    @unique
+  user      User?      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  items     CartItem[]
+  createdAt DateTime   @default(now())
+  updatedAt DateTime   @updatedAt
+}
+
+model CartItem {
+  id         String          @id @default(cuid())
+  cartId     String
+  cart       Cart            @relation(fields: [cartId], references: [id], onDelete: Cascade)
+  variantId  String?
+  variant    ProductVariant? @relation(fields: [variantId], references: [id], onDelete: Cascade)
+  usedUnitId String?
+  usedUnit   UsedUnit?       @relation(fields: [usedUnitId], references: [id], onDelete: Cascade)
+  quantity   Int             @default(1)
+  createdAt  DateTime        @default(now())
+
+  @@unique([cartId, variantId])
+  @@unique([cartId, usedUnitId])
+}
+
+model Favorite {
+  id         String    @id @default(cuid())
+  userId     String
+  user       User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  productId  String?
+  product    Product?  @relation(fields: [productId], references: [id], onDelete: Cascade)
+  usedUnitId String?
+  usedUnit   UsedUnit? @relation(fields: [usedUnitId], references: [id], onDelete: Cascade)
+  createdAt  DateTime  @default(now())
+
+  @@unique([userId, productId])
+  @@unique([userId, usedUnitId])
+}
+
+// ───────────────────────── Заказы, оплата, доставка ─────────────────────────
+
+enum OrderStatus {
+  NEW
+  AWAITING_PAYMENT
+  PAID
+  CONFIRMED
+  ASSEMBLING
+  SHIPPED
+  DELIVERED
+  COMPLETED
+  CANCELLED
+}
+
+enum PaymentMethod {
+  CASH_ON_DELIVERY
+  ONLINE
+  INSTALLMENT
+}
+
+model Order {
+  id             String        @id @default(cuid())
+  number         String        @unique
+  userId         String?
+  user           User?         @relation(fields: [userId], references: [id], onDelete: SetNull)
+  status         OrderStatus   @default(NEW)
+  customerName   String
+  phone          String
+  email          String?
+  city           String
+  address        String?
+  comment        String?
+  deliveryCode   String
+  paymentMethod  PaymentMethod
+  subtotal       Int
+  discount       Int           @default(0)
+  deliveryCost   Int           @default(0)
+  total          Int
+  promoCodeId    String?
+  promoCode      PromoCode?    @relation(fields: [promoCodeId], references: [id], onDelete: SetNull)
+  // Доступ гостя к странице заказа без входа
+  accessToken    String        @unique
+  createdAt      DateTime      @default(now())
+  updatedAt      DateTime      @updatedAt
+
+  items    OrderItem[]
+  history  OrderStatusHistory[]
+  payments Payment[]
+  shipment Shipment?
+  tickets  SupportTicket[]
+
+  @@index([userId])
+  @@index([status])
+  @@index([createdAt])
+}
+
+model OrderItem {
+  id         String          @id @default(cuid())
+  orderId    String
+  order      Order           @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  productId  String
+  product    Product         @relation(fields: [productId], references: [id])
+  variantId  String?
+  variant    ProductVariant? @relation(fields: [variantId], references: [id], onDelete: SetNull)
+  usedUnitId String?
+  usedUnit   UsedUnit?       @relation(fields: [usedUnitId], references: [id], onDelete: SetNull)
+  name       String
+  sku        String
+  unitPrice  Int
+  quantity   Int
+  total      Int
+
+  @@index([orderId])
+}
+
+model OrderStatusHistory {
+  id         String       @id @default(cuid())
+  orderId    String
+  order      Order        @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  fromStatus OrderStatus?
+  toStatus   OrderStatus
+  comment    String?
+  actorId    String?
+  createdAt  DateTime     @default(now())
+
+  @@index([orderId])
+}
+
+enum PaymentStatus {
+  PENDING
+  SUCCEEDED
+  FAILED
+  CANCELLED
+  REFUNDED
+}
+
+model Payment {
+  id                String        @id @default(cuid())
+  orderId           String
+  order             Order         @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  provider          String
+  providerPaymentId String?
+  amount            Int
+  status            PaymentStatus @default(PENDING)
+  isTest            Boolean       @default(true)
+  redirectUrl       String?
+  failureReason     String?
+  createdAt         DateTime      @default(now())
+  updatedAt         DateTime      @updatedAt
+
+  @@unique([provider, providerPaymentId])
+  @@index([orderId])
+}
+
+// Входящие события платёжного провайдера — для защиты от повторной обработки
+model PaymentEvent {
+  id          String   @id @default(cuid())
+  provider    String
+  eventId     String
+  payload     Json
+  processedAt DateTime @default(now())
+
+  @@unique([provider, eventId])
+}
+
+model DeliveryOption {
+  id        String   @id @default(cuid())
+  code      String   @unique
+  nameRu    String
+  nameKk    String
+  description String?
+  price     Int      @default(0)
+  freeFrom  Int?
+  needsAddress Boolean @default(true)
+  isActive  Boolean  @default(true)
+  sortOrder Int      @default(0)
+}
+
+enum ShipmentStatus {
+  PENDING
+  READY_FOR_PICKUP
+  IN_TRANSIT
+  DELIVERED
+  RETURNED
+}
+
+model Shipment {
+  id             String         @id @default(cuid())
+  orderId        String         @unique
+  order          Order          @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  deliveryCode   String
+  status         ShipmentStatus @default(PENDING)
+  carrier        String?
+  trackingNumber String?
+  cost           Int            @default(0)
+  updatedAt      DateTime       @updatedAt
+  createdAt      DateTime       @default(now())
+}
+
+enum PromoType {
+  PERCENT
+  FIXED
+}
+
+model PromoCode {
+  id            String    @id @default(cuid())
+  code          String    @unique
+  type          PromoType
+  value         Int
+  minOrderTotal Int       @default(0)
+  maxUses       Int?
+  usedCount     Int       @default(0)
+  startsAt      DateTime?
+  endsAt        DateTime?
+  isActive      Boolean   @default(true)
+  createdAt     DateTime  @default(now())
+  orders        Order[]
+}
+
+// ───────────────────────── Халяльная рассрочка ─────────────────────────
+
+enum ApplicationStatus {
+  NEW
+  IN_REVIEW
+  APPROVED
+  REJECTED
+  CANCELLED
+}
+
+model InstallmentApplication {
+  id            String            @id @default(cuid())
+  number        String            @unique
+  userId        String?
+  user          User?             @relation(fields: [userId], references: [id], onDelete: SetNull)
+  productId     String
+  product       Product           @relation(fields: [productId], references: [id])
+  variantId     String?
+  usedUnitId    String?
+  usedUnit      UsedUnit?         @relation(fields: [usedUnitId], references: [id], onDelete: SetNull)
+  itemName      String
+  price         Int
+  markup        Int               @default(0)
+  totalPrice    Int
+  downPayment   Int
+  termMonths    Int
+  monthlyAmount Int
+  fullName      String
+  phone         String
+  city          String
+  comment       String?
+  consentAt     DateTime
+  isDemo        Boolean           @default(true)
+  status        ApplicationStatus @default(NEW)
+  managerNote   String?
+  createdAt     DateTime          @default(now())
+  updatedAt     DateTime          @updatedAt
+  contract      InstallmentContract?
+
+  @@index([userId])
+  @@index([status])
+}
+
+enum ContractStatus {
+  DRAFT
+  ACTIVE
+  COMPLETED
+  CANCELLED
+}
+
+model InstallmentContract {
+  id            String                 @id @default(cuid())
+  number        String                 @unique
+  applicationId String                 @unique
+  application   InstallmentApplication @relation(fields: [applicationId], references: [id])
+  userId        String?
+  user          User?                  @relation(fields: [userId], references: [id], onDelete: SetNull)
+  totalPrice    Int
+  downPayment   Int
+  termMonths    Int
+  startDate     DateTime
+  status        ContractStatus         @default(DRAFT)
+  isDemo        Boolean                @default(true)
+  createdAt     DateTime               @default(now())
+  schedule      PaymentScheduleItem[]
+}
+
+enum ScheduleStatus {
+  PENDING
+  PAID
+}
+
+model PaymentScheduleItem {
+  id         String              @id @default(cuid())
+  contractId String
+  contract   InstallmentContract @relation(fields: [contractId], references: [id], onDelete: Cascade)
+  seq        Int
+  dueDate    DateTime
+  amount     Int
+  status     ScheduleStatus      @default(PENDING)
+  paidAt     DateTime?
+
+  @@unique([contractId, seq])
+}
+
+// ───────────────────────── Контент и сервис ─────────────────────────
+
+enum ReviewStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
+model Review {
+  id                 String       @id @default(cuid())
+  productId          String?
+  product            Product?     @relation(fields: [productId], references: [id], onDelete: Cascade)
+  userId             String?
+  user               User?        @relation(fields: [userId], references: [id], onDelete: SetNull)
+  authorName         String
+  rating             Int
+  text               String
+  isVerifiedPurchase Boolean      @default(false)
+  status             ReviewStatus @default(PENDING)
+  createdAt          DateTime     @default(now())
+
+  @@index([status])
+  @@index([productId])
+}
+
+model Banner {
+  id        String   @id @default(cuid())
+  placement String   @default("hero") // hero | promo
+  title     String
+  titleKk   String?
+  subtitle  String?
+  subtitleKk String?
+  ctaLabel  String?
+  ctaHref   String?
+  imageUrl  String?
+  theme     String   @default("dark") // dark | light | brand
+  sortOrder Int      @default(0)
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model Setting {
+  key       String   @id
+  value     Json
+  updatedAt DateTime @updatedAt
+}
+
+model SupportTicket {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  orderId   String?
+  order     Order?   @relation(fields: [orderId], references: [id], onDelete: SetNull)
+  subject   String
+  message   String
+  status    String   @default("OPEN") // OPEN | ANSWERED | CLOSED
+  reply     String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([userId])
+}
+
+model AuditLog {
+  id        String   @id @default(cuid())
+  actorId   String?
+  actor     User?    @relation(fields: [actorId], references: [id], onDelete: SetNull)
+  action    String
+  entity    String
+  entityId  String?
+  data      Json?
+  ip        String?
+  createdAt DateTime @default(now())
+
+  @@index([entity, entityId])
+  @@index([createdAt])
+}
+
+// Исходящие уведомления (email/SMS). Без подключённого провайдера остаются в очереди.
+model OutboxMessage {
+  id        String   @id @default(cuid())
+  channel   String // email | sms
+  to        String
+  subject   String?
+  body      String
+  status    String   @default("PENDING") // PENDING | SENT | FAILED
+  createdAt DateTime @default(now())
+}
