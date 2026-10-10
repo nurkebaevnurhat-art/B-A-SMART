@@ -73,7 +73,7 @@ test.describe("Покупатель", () => {
   test("покупатель не может открыть админ-панель", async ({ page, request }) => {
     await page.goto("/admin");
     await expect(page).toHaveURL(/\/account\/login/);
-    const res = await request.post("/api/v1/auth/login", { data: { login: "customer@basmart.kz", password: "Demo12345!" }, headers: { origin: "http://localhost:3000" } });
+    const res = await request.post("/api/v1/auth/login", { data: { login: "customer@basmart.kz", password: "Demo12345!" }, headers: { origin: "http://localhost:5520" } });
     expect(res.ok()).toBeTruthy();
   });
 });

@@ -10,7 +10,7 @@ import { ServiceWorker } from "@/components/ServiceWorker";
 const sans = Inter({ subsets: ["latin", "cyrillic", "cyrillic-ext"], variable: "--font-sans", display: "swap" });
 const display = Unbounded({ subsets: ["latin", "cyrillic", "cyrillic-ext"], variable: "--font-display", display: "swap", weight: ["400", "500", "600", "700"] });
 
-const siteUrl = process.env.APP_URL || "http://localhost:3000";
+const siteUrl = process.env.APP_URL || "http://localhost:5520";
 
 export const metadata: Metadata = {
   metadataBase: new URL(siteUrl),

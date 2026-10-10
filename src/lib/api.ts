@@ -61,5 +61,5 @@ export function searchParamsObject(req: NextRequest): Record<string, string> {
 }
 
 export function appUrl(req?: NextRequest) {
-  return process.env.APP_URL?.replace(/\/$/, "") || (req ? req.nextUrl.origin : "http://localhost:3000");
+  return process.env.APP_URL?.replace(/\/$/, "") || (req ? req.nextUrl.origin : "http://localhost:5520");
 }
